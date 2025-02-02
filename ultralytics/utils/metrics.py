@@ -172,7 +172,31 @@ def kpt_iou(kpt1, kpt2, area, sigma, eps=1e-7):
     kpt_mask = kpt1[..., 2] != 0  # (N, 17)
     e = d / ((2 * sigma).pow(2) * (area[:, None, None] + eps) * 2)  # from cocoeval
     # e = d / ((area[None, :, None] + eps) * sigma) ** 2 / 2  # from formula
-    return ((-e).exp() * kpt_mask[:, None]).sum(-1) / (kpt_mask.sum(-1)[:, None] + eps)
+
+def kpt_iou_per_keypoint(kpt1, kpt2, area, sigma, eps=1e-7):
+    """
+    Return the OKS for each keypoint individually instead of the average across keypoints.
+    Shape of output: (N, M, K) where K = number of keypoints (17 for COCO).
+    """
+    d = (kpt1[:, None, :, 0] - kpt2[..., 0]).pow(2) + (kpt1[:, None, :, 1] - kpt2[..., 1]).pow(2)
+    # d: (N, M, K)
+
+    sigma = torch.tensor(sigma, device=kpt1.device, dtype=kpt1.dtype)
+    # sigma: (K,)
+
+    kpt_mask = kpt1[..., 2] != 0
+    # kpt_mask: (N, K) – True if keypoint is visible
+
+    # e: (N, M, K)
+    e = d / ((2 * sigma).pow(2) * (area[:, None, None] + eps) * 2)
+
+    # Per-keypoint similarity = exp(-e) if that keypoint is visible, else 0
+    sim = torch.exp(-e) * kpt_mask[:, None]  # broadcast kpt_mask to (N, 1, K)
+
+    # Note that we are NOT summing or averaging across keypoints here
+    # shape: (N, M, K)
+    return sim
+
 
 
 def _get_covariance_matrix(boxes):

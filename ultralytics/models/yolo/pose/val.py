@@ -177,11 +177,20 @@ class PoseValidator(DetectionValidator):
         if pred_kpts is not None and gt_kpts is not None:
             # `0.53` is from https://github.com/jin-s13/xtcocoapi/blob/master/xtcocotools/cocoeval.py#L384
             area = ops.xyxy2xywh(gt_bboxes)[:, 2:].prod(1) * 0.53
-            iou = kpt_iou(gt_kpts, pred_kpts, sigma=self.sigma, area=area)
-        else:  # boxes
-            iou = box_iou(gt_bboxes, detections[:, :4])
+            #iou = kpt_iou(gt_kpts, pred_kpts, sigma=self.sigma, area=area)
 
-        return self.match_predictions(detections[:, 5], gt_cls, iou)
+            # iou_per_kpt: (M,N,K)
+            #   M = number of GT, N = number of predictions, K = number of keypoints
+
+            iou_per_kpt = kpt_iou_per_keypoint(gt_kpts, pred_kpts, sigma=self.sigma, area=area)
+
+            #reorder to n,m,k
+            iou_per_kpt = iou_per_kpt.permute(1, 0, 2).contiguous()  # shape: (N, M, K)
+
+        else:  # boxes
+            iou_per_kpt = box_iou(labels[:, 1:], detections[:, :4])[:, :, None]
+
+        return self.match_predictions(detections[:, 5], labels[:, 0], iou_per_kpt)
 
     def plot_val_samples(self, batch, ni):
         """Plots and saves validation set samples with predicted bounding boxes and keypoints."""

@@ -224,6 +224,9 @@ class BaseValidator:
     def match_predictions(self, pred_classes, true_classes, iou, use_scipy=False):
         """
         Matches predictions to ground truth objects (pred_classes, true_classes) using IoU.
+        #iou_per_kpt: shape (N,M,K)
+        #reduce to a 2d matrix by averaging over keypoints.
+
 
         Args:
             pred_classes (torch.Tensor): Predicted class indices of shape(N,).
@@ -233,34 +236,66 @@ class BaseValidator:
 
         Returns:
             (torch.Tensor): Correct tensor of shape(N,10) for 10 IoU thresholds.
-        """
-        # Dx10 matrix, where D - detections, 10 - IoU thresholds
-        correct = np.zeros((pred_classes.shape[0], self.iouv.shape[0])).astype(bool)
-        # LxD matrix where L - labels (rows), D - detections (columns)
-        correct_class = true_classes[:, None] == pred_classes
-        iou = iou * correct_class  # zero out the wrong classes
-        iou = iou.cpu().numpy()
-        for i, threshold in enumerate(self.iouv.cpu().tolist()):
-            if use_scipy:
-                # WARNING: known issue that reduces mAP in https://github.com/ultralytics/ultralytics/pull/4708
-                import scipy  # scope import to avoid importing for all commands
 
-                cost_matrix = iou * (iou >= threshold)
-                if cost_matrix.any():
-                    labels_idx, detections_idx = scipy.optimize.linear_sum_assignment(cost_matrix)
-                    valid = cost_matrix[labels_idx, detections_idx] > 0
-                    if valid.any():
-                        correct[detections_idx[valid], i] = True
-            else:
-                matches = np.nonzero(iou >= threshold)  # IoU > threshold and classes match
-                matches = np.array(matches).T
-                if matches.shape[0]:
-                    if matches.shape[0] > 1:
-                        matches = matches[iou[matches[:, 0], matches[:, 1]].argsort()[::-1]]
-                        matches = matches[np.unique(matches[:, 1], return_index=True)[1]]
-                        # matches = matches[matches[:, 2].argsort()[::-1]]
-                        matches = matches[np.unique(matches[:, 0], return_index=True)[1]]
-                    correct[matches[:, 1].astype(int), i] = True
+        """
+        # Determine sizes.
+        # Let M be the number of ground truth objects, N the number of detections, K the number of keypoints,
+        # and T the number of IoU thresholds.
+        # now iou has shape (N, M)
+        M, N, K = iou_per_kpt.shape
+
+        T = len(self.iouv) if not isinstance(self.iouv, torch.Tensor) else self.iouv.shape[0]
+
+        # Initialize the correctness tensor.
+        # For each detection (N) and each threshold (T) we will store a match flag per keypoint (K).
+        correct = np.zeros((N, T, K), dtype=bool)
+
+        # LxD matrix where L - labels (rows), D - detections (columns)
+        # Compute the class matching mask.
+        # correct_class has shape (M, N): entry [m, n] is True if ground truth m and detection n have the same class.
+        correct_class = (true_classes[:, None] == pred_classes)
+        # Process each keypoint separately.
+        for k in range(K):
+            # For keypoint k, extract the IoU matrix of shape (M, N).
+            iou = iou_per_kpt[:, :, k]
+            # Zero out pairs that are of the wrong class.
+            iou = iou * correct_class
+
+            # If iou is a torch.Tensor, convert it to a NumPy array for matching.
+            iou_np = iou.cpu().numpy() if hasattr(iou, "cpu") else iou
+
+            # For each IoU threshold:
+            for i, threshold in enumerate(self.iouv.cpu().tolist() if hasattr(self.iouv, "cpu") else list(self.iouv)):
+                if use_scipy:
+                    import scipy.optimize
+                    # Construct a cost matrix that zeroes out low IoU values.
+                    cost_matrix = iou_np * (iou_np >= threshold)
+                    if cost_matrix.any():
+                        # Solve the assignment problem to maximize total IoU.
+                        labels_idx, detections_idx = scipy.optimize.linear_sum_assignment(cost_matrix, maximize=True)
+                        # Valid matches have cost greater than zero.
+                        valid = cost_matrix[labels_idx, detections_idx] > 0
+                        if valid.any():
+                            # detections_idx are the indices of detections that have a valid match.
+                            correct[detections_idx[valid], i, k] = True
+                else:
+                    # Find all detection–GT pairs where IoU exceeds the threshold.
+                    # np.nonzero returns a tuple (label_indices, detection_indices).
+                    matches = np.nonzero(iou_np >= threshold)
+                    matches = np.array(matches).T  # Each row is [label_index, detection_index]
+                    if matches.shape[0]:
+                        if matches.shape[0] > 1:
+                            # Sort matches by descending IoU.
+                            order = iou_np[matches[:, 0], matches[:, 1]].argsort()[::-1]
+                            matches = matches[order]
+                            # Ensure each detection and each label is only used once.
+                            _, unique_detection_idx = np.unique(matches[:, 1], return_index=True)
+                            matches = matches[np.sort(unique_detection_idx)]
+                            _, unique_label_idx = np.unique(matches[:, 0], return_index=True)
+                            matches = matches[np.sort(unique_label_idx)]
+                        # In the original function, the detection index is in column 1.
+                        correct[matches[:, 1].astype(int), i, k] = True
+        # Convert the result to a torch tensor on the same device as pred_classes.
         return torch.tensor(correct, dtype=torch.bool, device=pred_classes.device)
 
     def add_callback(self, event: str, callback):
