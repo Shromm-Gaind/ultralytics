@@ -221,17 +221,16 @@ class BaseValidator:
                 LOGGER.info(f"Results saved to {colorstr('bold', self.save_dir)}")
             return stats
 
-    def match_predictions(self, pred_classes, true_classes, iou, use_scipy=False):
+    def match_predictions(self, pred_classes, true_classes, iou_per_kpt, use_scipy=False):
         """
         Matches predictions to ground truth objects (pred_classes, true_classes) using IoU.
-        #iou_per_kpt: shape (N,M,K)
         #reduce to a 2d matrix by averaging over keypoints.
 
 
         Args:
+            #iou_per_kpt: shape (N,M,K)
             pred_classes (torch.Tensor): Predicted class indices of shape(N,).
             true_classes (torch.Tensor): Target class indices of shape(M,).
-            iou (torch.Tensor): An NxM tensor containing the pairwise IoU values for predictions and ground of truth
             use_scipy (bool): Whether to use scipy for matching (more precise).
 
         Returns:
