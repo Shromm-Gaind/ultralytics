@@ -215,8 +215,8 @@ class BaseValidator:
             if self.args.save_json and self.jdict:
                 with open(str(self.save_dir / "predictions.json"), "w") as f:
                     LOGGER.info(f"Saving {f.name}...")
-                    json.dump(self.jdict, f)  # flatten and save
-                stats = self.eval_json(stats)  # update stats
+                    json.dump(self.jdict, f)
+                stats = self.eval_json(stats)
             if self.args.plots or self.args.save_json:
                 LOGGER.info(f"Results saved to {colorstr('bold', self.save_dir)}")
             return stats
@@ -225,17 +225,13 @@ class BaseValidator:
         """
         Matches predictions to ground truth objects (pred_classes, true_classes) using IoU.
         #reduce to a 2d matrix by averaging over keypoints.
-
-
         Args:
             #iou_per_kpt: shape (N,M,K)
             pred_classes (torch.Tensor): Predicted class indices of shape(N,).
             true_classes (torch.Tensor): Target class indices of shape(M,).
             use_scipy (bool): Whether to use scipy for matching (more precise).
-
         Returns:
             (torch.Tensor): Correct tensor of shape(N,10) for 10 IoU thresholds.
-
         """
         # Determine sizes.
         # Let M be the number of ground truth objects, N the number of detections, K the number of keypoints,

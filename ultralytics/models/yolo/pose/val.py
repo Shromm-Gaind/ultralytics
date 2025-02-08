@@ -184,13 +184,11 @@ class PoseValidator(DetectionValidator):
 
             iou_per_kpt = kpt_iou_per_keypoint(gt_kpts, pred_kpts, sigma=self.sigma, area=area)
 
-            #reorder to n,m,k
-            iou_per_kpt = iou_per_kpt.permute(1, 0, 2).contiguous()  # shape: (N, M, K)
-
         else:  # boxes
-            iou_per_kpt = box_iou(labels[:, 1:], detections[:, :4])[:, :, None]
+            #iou_per_kpt = box_iou(labels[:, 1:], detections[:, :4])[:, :, None]
+            iou_per_kpt = box_iou(gt_bboxes, detections[:, :4])[:, :, None]  # (M, N, 1)
 
-        return self.match_predictions(detections[:, 5], labels[:, 0], iou_per_kpt)
+        return self.match_predictions(detections[:, 5], gt_cls, iou_per_kpt)
 
     def plot_val_samples(self, batch, ni):
         """Plots and saves validation set samples with predicted bounding boxes and keypoints."""

@@ -197,8 +197,6 @@ def kpt_iou_per_keypoint(kpt1, kpt2, area, sigma, eps=1e-7):
     # shape: (N, M, K)
     return sim
 
-
-
 def _get_covariance_matrix(boxes):
     """
     Generating covariance matrix from obbs.
@@ -645,6 +643,43 @@ def ap_per_class(
     tp = (r * nt).round()  # true positives
     fp = (tp / (p + eps) - tp).round()  # false positives
     return tp, fp, p, r, f1, ap, unique_classes.astype(int), p_curve, r_curve, f1_curve, x, prec_values
+
+
+def ap_per_class_keypoints(
+        tp, conf, pred_cls, target_cls, plot=False, on_plot=None, save_dir=Path(), names={}, eps=1e-16, prefix=""
+):
+    """
+    Computes the average precision per class for each keypoint separately.
+
+    This function assumes that:
+      - tp is a numpy array with shape (N, T, K) where:
+            N = number of detections,
+            T = number of IoU thresholds (e.g., 10),
+            K = number of keypoints.
+      - conf, pred_cls, and target_cls are as in the original ap_per_class.
+
+    Returns:
+      A dictionary mapping each keypoint index (0 to K-1) to the tuple of outputs
+      from the original ap_per_class. For example, for keypoint k:
+
+          results[k] = (tp_k, fp_k, p_k, r_k, f1_k, ap_k, unique_classes, p_curve, r_curve, f1_curve, x, prec_values)
+
+      where each element is computed for the true positives corresponding to keypoint k.
+    """
+    K = tp.shape[2]
+    results = {}
+    for k in range(K):
+        # Extract the tp slice for keypoint k: shape becomes (N, T)
+        tp_k = tp[:, :, k]
+
+        # Call the original ap_per_class function on the slice.
+        # This function expects tp_k (2D), conf (1D), pred_cls (1D), target_cls (1D)
+        res = ap_per_class(tp_k, conf, pred_cls, target_cls, plot=plot, on_plot=on_plot, save_dir=save_dir, names=names,
+                           eps=eps, prefix=prefix)
+
+        # Save the result for keypoint k
+        results[k] = res
+    return results
 
 
 class Metric(SimpleClass):
@@ -1112,7 +1147,7 @@ class PoseMetrics(SegmentMetrics):
             pred_cls (list): List of predicted classes.
             target_cls (list): List of target classes.
         """
-        results_pose = ap_per_class(
+        results_pose_keypoints = ap_per_class_keypoints(
             tp_p,
             conf,
             pred_cls,
@@ -1123,8 +1158,10 @@ class PoseMetrics(SegmentMetrics):
             names=self.names,
             prefix="Pose",
         )[2:]
+        # Instead of averaging or merging them, store the results per keypoint.
+        # For example, add an attribute to hold per-keypoint metrics.
         self.pose.nc = len(self.names)
-        self.pose.update(results_pose)
+        self.pose.keypoint_results = results_pose_keypoints  # Storing individually
         results_box = ap_per_class(
             tp,
             conf,
